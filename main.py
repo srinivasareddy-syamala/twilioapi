@@ -5,28 +5,30 @@ import os
 
 app = FastAPI()
 
-
 # -----------------------------
-# ROOT ROUTE (Health Check)
+# Health Check
 # -----------------------------
 @app.get("/")
 def home():
     return {"message": "Doctor VoIP Server is running successfully"}
 
-
 # -----------------------------
-# INCOMING CALL HANDLER
+# Incoming Call IVR
 # -----------------------------
 @app.post("/voice")
 async def voice():
     response = VoiceResponse()
 
-    gather = Gather(
-        num_digits=1,
-        action="/process-price",
-        method="POST"
+    # Start recording the call
+    response.record(
+        max_length=300,            # Record max 5 minutes
+        action="/process-recording",  # Trigger webhook when recording ends
+        method="POST",
+        play_beep=True
     )
 
+    # Menu options
+    gather = Gather(num_digits=1, action="/process-price", method="POST")
     gather.say(
         "Welcome to City Hospital. "
         "Press 1 for Basic consultation costing 500 rupees. "
@@ -37,13 +39,14 @@ async def voice():
     response.append(gather)
 
     # If no input
-    response.redirect("/voice")
+    response.say("We did not receive your input. Please call again.")
+    response.hangup()
 
     return Response(content=str(response), media_type="application/xml")
 
 
 # -----------------------------
-# PROCESS PRICE SELECTION
+# Process Price Selection
 # -----------------------------
 @app.post("/process-price")
 async def process_price(request: Request):
@@ -59,7 +62,6 @@ async def process_price(request: Request):
     consultation, price = price_map.get(digit, ("Basic", 500))
 
     response = VoiceResponse()
-
     response.say(
         f"You selected {consultation} consultation costing {price} rupees. "
         "Your appointment request has been recorded. "
@@ -67,12 +69,23 @@ async def process_price(request: Request):
     )
 
     response.hangup()
-
     return Response(content=str(response), media_type="application/xml")
 
 
 # -----------------------------
-# LOCAL RUN (Optional)
+# Recording Webhook
+# -----------------------------
+@app.post("/process-recording")
+async def process_recording(request: Request):
+    form = await request.form()
+    recording_url = form.get("RecordingUrl")
+    print("Recording URL:", recording_url)  # You can log it in Railway logs
+    # Optionally: store in DB
+    return Response(status_code=200)
+
+
+# -----------------------------
+# Railway Local Run
 # -----------------------------
 if __name__ == "__main__":
     import uvicorn
